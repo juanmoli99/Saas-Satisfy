@@ -1,0 +1,4 @@
+import { db } from "./db";import{hmac,randomToken,safeEqual}from"./crypto";import{env}from"./env";
+export function credentialHash(token:string){return hmac(token,env().INTEGRATION_KEY_PEPPER)}
+export function newIntegrationCredential(){const token=`svc_${randomToken(9)}.${randomToken(32)}`;return{token,keyPrefix:token.slice(0,16),secretHash:credentialHash(token)}}
+export async function resolveIntegrationCredential(token:string){const prefix=token.slice(0,16);const now=new Date();const candidates=await db.integrationCredential.findMany({where:{keyPrefix:prefix,OR:[{status:"ACTIVE"},{status:"TRANSITION",transitionEndsAt:{gt:now}}]},include:{service:{include:{periods:{where:{startsAt:{lte:now},endsAt:{gt:now}},take:1}}}}});const found=candidates.find(c=>safeEqual(c.secretHash,credentialHash(token)));if(!found)return null;await db.integrationCredential.update({where:{id:found.id},data:{lastUsedAt:now}});return found}

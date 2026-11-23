@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gestion_saas
+      POSTGRES_USER: gestion
+      POSTGRES_PASSWORD: desarrollo_local_cambiar
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gestion -d gestion_saas"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports: ["3000:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    command: ["sh", "-c", "npx prisma migrate deploy && npm start"]
+  worker:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres: { condition: service_healthy }
+    command: ["npm", "run", "worker"]
+volumes:
+  postgres_data:

@@ -1,0 +1,596 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  SELLER
+}
+enum UserStatus {
+  INVITED
+  ACTIVE
+  DISABLED
+  RECOVERY_REQUIRED
+}
+enum ClientStatus {
+  ACTIVE
+  INACTIVE
+  ANONYMIZED
+}
+enum ServiceStatus {
+  PENDING_AUTHORIZATION
+  PENDING_FIRST_PAYMENT
+  ACTIVE
+  GRACE
+  SUSPENSION_SCHEDULED
+  SUSPENDED
+  CANCELLATION_SCHEDULED
+  CANCELED
+  INCIDENT
+}
+enum SubscriptionStatus {
+  DRAFT
+  PENDING
+  AUTHORIZED
+  PAUSED
+  CANCELED
+  INCIDENT
+}
+enum PaymentProvider {
+  MERCADO_PAGO
+  EXTERNAL
+  SIMULATION
+}
+enum PaymentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  REFUNDED
+  CHARGED_BACK
+  CANCELED
+}
+enum PaymentMethod {
+  MERCADO_PAGO
+  BANK_TRANSFER
+  CASH
+  OTHER
+}
+enum CommissionStatus {
+  PENDING_CALCULATION
+  GENERATED
+  SETTLED
+  ADJUSTED
+}
+enum SettlementStatus {
+  OPEN
+  PENDING_PAYMENT
+  PAID
+  CANCELED
+}
+enum ExpenseStatus {
+  PENDING
+  OVERDUE
+  PAID
+  VOID
+}
+enum ExpenseFrequency {
+  MONTHLY
+  QUARTERLY
+  SEMIANNUAL
+  ANNUAL
+}
+enum Currency {
+  ARS
+  USD
+}
+enum DocumentCategory {
+  CONTRACT
+  QUOTE
+  RECEIPT
+  OTHER
+}
+enum CredentialStatus {
+  ACTIVE
+  TRANSITION
+  REVOKED
+}
+enum NotificationChannel {
+  WHATSAPP
+}
+enum NotificationStatus {
+  QUEUED
+  SENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+  CANCELED
+}
+enum IncidentSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+enum IncidentStatus {
+  OPEN
+  RESOLVED
+}
+enum AuditOrigin {
+  USER
+  SYSTEM
+  WEBHOOK
+  WORKER
+}
+
+model User {
+  id                     String       @id @default(cuid())
+  email                  String       @unique
+  passwordHash           String
+  displayName            String
+  role                    UserRole
+  status                  UserStatus  @default(INVITED)
+  totpSecretEncrypted     String?
+  totpEnabledAt           DateTime?
+  theme                   String       @default("system")
+  commissionRate          Decimal?     @db.Decimal(7, 4)
+  commissionEffectiveAt   DateTime?
+  createdAt               DateTime     @default(now())
+  updatedAt               DateTime     @updatedAt
+  disabledAt              DateTime?
+  sessions                Session[]
+  permissions             UserPermission[]
+  assignedClients         Client[]     @relation("CurrentSeller")
+  sellerHistory           ClientSellerHistory[] @relation("SellerHistory")
+  commissions             Commission[]
+  settlements             Settlement[]
+  audits                   AuditLog[]   @relation("ActorAudits")
+  requestedPriceChanges   PriceChange[]
+  confirmedExternalPayments Payment[]  @relation("PaymentConfirmer")
+  createdDocuments        Document[]
+  commissionRateChanges   CommissionRateChange[] @relation("SellerRateChanges")
+  createdRateChanges      CommissionRateChange[] @relation("CreatedRateChanges")
+
+  @@index([role, status])
+}
+
+model Permission {
+  id          String @id @default(cuid())
+  code        String @unique
+  description String
+  users       UserPermission[]
+}
+
+model UserPermission {
+  userId       String
+  permissionId String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  @@id([userId, permissionId])
+}
+
+model Session {
+  id             String   @id @default(cuid())
+  tokenHash      String   @unique
+  csrfTokenHash  String
+  userId         String   @unique
+  userAgent      String?
+  ipAddress      String?
+  createdAt      DateTime @default(now())
+  lastActivityAt DateTime @default(now())
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([expiresAt])
+}
+
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  emailHash String
+  ipHash    String
+  success   Boolean
+  createdAt DateTime @default(now())
+  @@index([emailHash, createdAt])
+  @@index([ipHash, createdAt])
+}
+
+model Client {
+  id               String       @id @default(cuid())
+  businessName     String
+  legalName        String?
+  taxId            String?
+  email            String?
+  phone            String?
+  whatsapp         String?
+  whatsappOptInAt  DateTime?
+  notes            String?
+  status            ClientStatus @default(ACTIVE)
+  sellerId          String?
+  seller            User?        @relation("CurrentSeller", fields: [sellerId], references: [id], onDelete: SetNull)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  disabledAt        DateTime?
+  services          Service[]
+  payments          Payment[]
+  documents         Document[]
+  sellerHistory     ClientSellerHistory[]
+  @@index([status])
+  @@index([sellerId])
+  @@index([businessName])
+}
+
+model ClientSellerHistory {
+  id          String   @id @default(cuid())
+  clientId    String
+  sellerId    String
+  assignedAt  DateTime @default(now())
+  unassignedAt DateTime?
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  seller      User     @relation("SellerHistory", fields: [sellerId], references: [id], onDelete: Restrict)
+  @@index([clientId, assignedAt])
+}
+
+model Service {
+  id                 String        @id @default(cuid())
+  clientId           String
+  name               String
+  description        String?
+  monthlyPrice       Decimal       @db.Decimal(14, 2)
+  currency           Currency      @default(ARS)
+  status             ServiceStatus @default(PENDING_AUTHORIZATION)
+  domain             String?
+  systemUrl          String?
+  hostingProvider    String?
+  domainExpiresAt    DateTime?
+  hostingExpiresAt   DateTime?
+  technicalNotes     String?
+  graceEndsAt        DateTime?
+  suspendAt          DateTime?
+  accessRevision     Int           @default(1)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  client             Client        @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  subscriptions      Subscription[]
+  periods            ServicePeriod[]
+  payments           Payment[]
+  priceChanges       PriceChange[]
+  expenses           Expense[]
+  documents          Document[]
+  credentials        IntegrationCredential[]
+  incidents          Incident[]
+  @@index([clientId, status])
+  @@index([status, graceEndsAt])
+  @@index([status, suspendAt])
+}
+
+model PriceChange {
+  id                String   @id @default(cuid())
+  serviceId         String
+  oldPrice          Decimal  @db.Decimal(14, 2)
+  newPrice          Decimal  @db.Decimal(14, 2)
+  effectiveAt       DateTime
+  appliedAt         DateTime?
+  requestedById     String
+  providerSyncStatus String  @default("pending")
+  providerError     String?
+  createdAt         DateTime @default(now())
+  service           Service  @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  requestedBy       User     @relation(fields: [requestedById], references: [id], onDelete: Restrict)
+  @@index([effectiveAt, appliedAt])
+}
+
+model Subscription {
+  id                    String             @id @default(cuid())
+  serviceId             String
+  providerId            String?            @unique
+  externalReference     String             @unique
+  status                SubscriptionStatus @default(DRAFT)
+  authorizationUrl      String?
+  providerAmount        Decimal?           @db.Decimal(14, 2)
+  nextBillingAt         DateTime?
+  providerPayload       Json?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  pausedAt              DateTime?
+  canceledAt            DateTime?
+  service               Service            @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  payments              Payment[]
+  @@index([serviceId, status])
+  @@index([nextBillingAt])
+}
+
+model ServicePeriod {
+  id          String   @id @default(cuid())
+  serviceId   String
+  paymentId   String?  @unique
+  startsAt    DateTime
+  endsAt      DateTime
+  price       Decimal  @db.Decimal(14, 2)
+  createdAt   DateTime @default(now())
+  service     Service  @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  payment     Payment? @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  @@index([serviceId, startsAt, endsAt])
+}
+
+model Payment {
+  id                String          @id @default(cuid())
+  clientId          String
+  serviceId         String
+  subscriptionId    String?
+  provider          PaymentProvider
+  providerPaymentId String?         @unique
+  idempotencyKey    String          @unique
+  status            PaymentStatus   @default(PENDING)
+  method            PaymentMethod
+  grossAmount       Decimal         @db.Decimal(14, 2)
+  feesAmount        Decimal?        @db.Decimal(14, 2)
+  taxesAmount       Decimal?        @db.Decimal(14, 2)
+  withholdingAmount Decimal?        @db.Decimal(14, 2)
+  netAmount         Decimal?        @db.Decimal(14, 2)
+  currency          Currency        @default(ARS)
+  effectiveAt       DateTime?
+  periodStart       DateTime?
+  periodEnd         DateTime?
+  externalReference String?
+  notes             String?
+  receiptObjectKey  String?
+  providerPayload   Json?
+  confirmedById     String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  client            Client          @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  service           Service         @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  subscription      Subscription?    @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  confirmedBy       User?            @relation("PaymentConfirmer", fields: [confirmedById], references: [id], onDelete: Restrict)
+  commission        Commission?
+  period            ServicePeriod?
+  @@index([serviceId, status, effectiveAt])
+  @@index([clientId, status])
+}
+
+model Commission {
+  id                  String           @id @default(cuid())
+  paymentId           String           @unique
+  sellerId            String
+  percentage          Decimal          @db.Decimal(7, 4)
+  baseNetAmount       Decimal?         @db.Decimal(14, 2)
+  amount              Decimal?         @db.Decimal(14, 2)
+  status              CommissionStatus
+  accreditedAt        DateTime
+  createdAt           DateTime         @default(now())
+  payment             Payment          @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  seller              User             @relation(fields: [sellerId], references: [id], onDelete: Restrict)
+  settlementItems     SettlementItem[]
+  @@index([sellerId, accreditedAt, status])
+}
+
+model CommissionRateChange {
+  id           String   @id @default(cuid())
+  sellerId     String
+  createdById  String
+  oldRate      Decimal  @db.Decimal(7, 4)
+  newRate      Decimal  @db.Decimal(7, 4)
+  effectiveAt  DateTime
+  appliedAt    DateTime?
+  createdAt    DateTime @default(now())
+  seller       User     @relation("SellerRateChanges", fields: [sellerId], references: [id], onDelete: Restrict)
+  createdBy    User     @relation("CreatedRateChanges", fields: [createdById], references: [id], onDelete: Restrict)
+  @@index([effectiveAt, appliedAt])
+}
+
+model Settlement {
+  id             String           @id @default(cuid())
+  sellerId       String
+  month          DateTime
+  status         SettlementStatus @default(OPEN)
+  totalAmount    Decimal          @default(0) @db.Decimal(14, 2)
+  paidAt         DateTime?
+  paymentMethod  String?
+  paymentReference String?
+  notes          String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  seller         User             @relation(fields: [sellerId], references: [id], onDelete: Restrict)
+  items          SettlementItem[]
+  @@unique([sellerId, month])
+  @@index([month, status])
+}
+
+model SettlementItem {
+  settlementId String
+  commissionId String
+  adjustment   Decimal    @default(0) @db.Decimal(14, 2)
+  note         String?
+  settlement   Settlement @relation(fields: [settlementId], references: [id], onDelete: Restrict)
+  commission   Commission @relation(fields: [commissionId], references: [id], onDelete: Restrict)
+  @@id([settlementId, commissionId])
+}
+
+model ExpenseRecurrence {
+  id                    String           @id @default(cuid())
+  concept               String
+  category              String
+  expectedAmount        Decimal          @db.Decimal(14, 2)
+  currency              Currency
+  supplier              String?
+  frequency             ExpenseFrequency
+  nextDueAt             DateTime
+  active                Boolean          @default(true)
+  serviceId             String?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  expenses              Expense[]
+  @@index([active, nextDueAt])
+}
+
+model Expense {
+  id                    String        @id @default(cuid())
+  recurrenceId          String?
+  serviceId             String?
+  concept               String
+  category              String
+  expectedAmount        Decimal       @db.Decimal(14, 2)
+  finalAmount           Decimal?      @db.Decimal(14, 2)
+  currency              Currency
+  supplier              String?
+  issuedAt              DateTime
+  dueAt                 DateTime
+  status                ExpenseStatus @default(PENDING)
+  paidAt                DateTime?
+  paymentMethod         String?
+  notes                 String?
+  receiptObjectKey      String?
+  exchangeRateSource    String?
+  suggestedExchangeRate Decimal?      @db.Decimal(14, 4)
+  usedExchangeRate      Decimal?      @db.Decimal(14, 4)
+  arsEquivalent         Decimal?      @db.Decimal(14, 2)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  recurrence            ExpenseRecurrence? @relation(fields: [recurrenceId], references: [id], onDelete: Restrict)
+  service               Service?      @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  @@index([status, dueAt])
+  @@index([serviceId])
+}
+
+model Document {
+  id            String           @id @default(cuid())
+  clientId      String
+  serviceId     String?
+  category      DocumentCategory
+  fileName      String
+  objectKey     String           @unique
+  mimeType      String
+  sizeBytes     Int
+  sha256        String
+  createdById   String
+  createdAt     DateTime         @default(now())
+  deletedAt     DateTime?
+  client        Client           @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  service       Service?         @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  createdBy     User             @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  @@index([clientId, deletedAt])
+}
+
+model IntegrationCredential {
+  id                 String           @id @default(cuid())
+  serviceId          String
+  label              String
+  keyPrefix          String
+  secretHash         String           @unique
+  status             CredentialStatus @default(ACTIVE)
+  createdAt          DateTime         @default(now())
+  transitionEndsAt   DateTime?
+  revokedAt          DateTime?
+  lastUsedAt         DateTime?
+  service            Service          @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  @@index([serviceId, status])
+  @@index([status, transitionEndsAt])
+}
+
+model WebhookEvent {
+  id               String   @id @default(cuid())
+  provider         String
+  providerEventId  String
+  eventType        String
+  resourceId       String?
+  signatureValid   Boolean
+  payload          Json
+  status           String   @default("received")
+  error            String?
+  receivedAt       DateTime @default(now())
+  processedAt      DateTime?
+  @@unique([provider, providerEventId])
+  @@index([provider, status, receivedAt])
+}
+
+model Notification {
+  id              String             @id @default(cuid())
+  deduplicationKey String             @unique
+  channel         NotificationChannel @default(WHATSAPP)
+  recipient       String
+  templateName    String
+  languageCode    String             @default("es_AR")
+  parameters      Json
+  status          NotificationStatus @default(QUEUED)
+  providerId      String?            @unique
+  attempts        Int                @default(0)
+  nextAttemptAt   DateTime           @default(now())
+  lastError       String?
+  createdAt       DateTime           @default(now())
+  sentAt          DateTime?
+  deliveredAt     DateTime?
+  @@index([status, nextAttemptAt])
+}
+
+model ExchangeRate {
+  id            String   @id @default(cuid())
+  reference     String
+  source        String
+  suggestedRate Decimal  @db.Decimal(14, 4)
+  effectiveAt   DateTime
+  fetchedAt     DateTime @default(now())
+  rawPayload    Json?
+  @@index([reference, effectiveAt])
+}
+
+model Incident {
+  id          String           @id @default(cuid())
+  serviceId   String?
+  code        String
+  severity    IncidentSeverity
+  status      IncidentStatus   @default(OPEN)
+  title       String
+  detail      String
+  metadata    Json?
+  createdAt   DateTime         @default(now())
+  resolvedAt  DateTime?
+  service     Service?         @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  @@index([status, severity, createdAt])
+}
+
+model AuditLog {
+  id          String      @id @default(cuid())
+  actorId     String?
+  origin      AuditOrigin
+  action      String
+  module      String
+  recordType  String
+  recordId    String?
+  before      Json?
+  after       Json?
+  result      String
+  ipAddress   String?
+  createdAt   DateTime    @default(now())
+  actor       User?       @relation("ActorAudits", fields: [actorId], references: [id], onDelete: Restrict)
+  @@index([module, recordId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model BackupRun {
+  id             String   @id @default(cuid())
+  status         String
+  objectKey      String?
+  checksum       String?
+  sizeBytes      BigInt?
+  startedAt      DateTime @default(now())
+  finishedAt     DateTime?
+  error          String?
+}
+
+model JobLock {
+  name       String   @id
+  lockedAt   DateTime
+  lockedBy   String
+  expiresAt  DateTime
+}
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}

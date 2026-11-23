@@ -1,0 +1,4 @@
+import{S3Client}from"@aws-sdk/client-s3";
+function bool(v:string|undefined){return v==="true"}
+export function documentStorage(){return{client:new S3Client({endpoint:process.env.S3_ENDPOINT,region:process.env.S3_REGION??"auto",forcePathStyle:bool(process.env.S3_FORCE_PATH_STYLE),credentials:process.env.S3_ACCESS_KEY_ID&&process.env.S3_SECRET_ACCESS_KEY?{accessKeyId:process.env.S3_ACCESS_KEY_ID,secretAccessKey:process.env.S3_SECRET_ACCESS_KEY}:undefined}),bucket:process.env.S3_BUCKET??""}}
+export function backupStorage(){return{client:new S3Client({endpoint:process.env.BACKUP_S3_ENDPOINT,region:process.env.BACKUP_S3_REGION??"auto",forcePathStyle:bool(process.env.BACKUP_S3_FORCE_PATH_STYLE),credentials:process.env.BACKUP_S3_ACCESS_KEY_ID&&process.env.BACKUP_S3_SECRET_ACCESS_KEY?{accessKeyId:process.env.BACKUP_S3_ACCESS_KEY_ID,secretAccessKey:process.env.BACKUP_S3_SECRET_ACCESS_KEY}:undefined}),bucket:process.env.BACKUP_S3_BUCKET??""}}

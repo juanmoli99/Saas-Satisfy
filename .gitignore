@@ -1,0 +1,14 @@
+node_modules/
+.next/
+coverage/
+.env
+.env.local
+.env.*.local
+!.env.example
+*.log
+*.tsbuildinfo
+backups/
+storage/
+*.pem
+*.key
+.DS_Store
